@@ -1,3 +1,4 @@
+import { exportStats } from './stats-export.js';
 import { screenHtml } from './ui.js';
 import { InlineKeyboard } from 'grammy';
 import type { Update } from 'grammy/types';
@@ -32,6 +33,7 @@ async function worker(types:string[]) {
     case 'digest':await generateDigest(db,BigInt(p.userId!));break;
     case 'deliver':if(!bot||!config.DELIVERY_ENABLED)throw new Error('Delivery is disabled');await deliverDigest(db,p.id!,{send:async(chat,text,id)=>(await bot.api.sendMessage(String(chat),screenHtml(text),{parse_mode:'HTML',reply_markup:new InlineKeyboard().text('View daily matches →',`D|${id}|0`),link_preview_options:{is_disabled:true}})).message_id});break;
     case 'cleanup':await cleanup(db);break;
+    case 'stats-export':if(bot&&config.ADMIN_TELEGRAM_ID)await exportStats(db,bot.api,config.ADMIN_TELEGRAM_ID);break;
    }
   });
   if(!ran)await pause(2000);
@@ -42,9 +44,10 @@ async function scheduler(){while(!stopped){try{
  if(config.SOURCE_SYNC_ENABLED){await enqueue(db,'sync',`sync:${hour}`);await enqueue(db,'status',`status:${hour}`);}
  if(config.SCHEDULER_ENABLED)await scheduleUsers(db);
  await enqueue(db,'cleanup',`cleanup:${day}`);
+ if(bot&&config.STATS_EXPORT_ENABLED&&config.ADMIN_TELEGRAM_ID){const date=new Date(Date.now()+8*3600_000).toISOString().slice(0,10);await enqueue(db,'stats-export',`stats-export:${config.ADMIN_TELEGRAM_ID}:${date}`);}
  }catch(e){console.error(JSON.stringify({event:'scheduler_error',error:safeError(e)}));}
  await pause(30000);
 }}
-const loops=[worker(['inbox']),worker([...(config.SOURCE_SYNC_ENABLED?['sync','status']:[]),...(config.SCHEDULER_ENABLED?['digest']:[]),'cleanup']),...(config.DELIVERY_ENABLED?[worker(['deliver'])]:[]),scheduler()];
+const loops=[worker(['inbox']),worker([...(config.SOURCE_SYNC_ENABLED?['sync','status']:[]),...(config.SCHEDULER_ENABLED?['digest']:[]),'cleanup',...(config.STATS_EXPORT_ENABLED?['stats-export']:[])]),...(config.DELIVERY_ENABLED?[worker(['deliver'])]:[]),scheduler()];
 async function shutdown(){if(stopped)return;stopped=true;await app.close();await Promise.race([Promise.all(loops),pause(25000)]);releaseLock();await db.$disconnect();process.exit(0);}
 process.once('SIGTERM',()=>void shutdown());process.once('SIGINT',()=>void shutdown());

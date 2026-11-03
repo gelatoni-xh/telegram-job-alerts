@@ -243,3 +243,19 @@ test('admin stats: Shanghai midnight, weekly unique users, retries and all exclu
  assert.match(report,/Interactions: 3 \(up from 0/);
  assert.match(report,/Registered users: 3\nUsers with enabled alerts: 1/);
 });
+
+test('Telegram aggregate export pins one private message, retries reuse it, and snapshot is aggregate only',async()=>{
+ const {exportStats,statsPrefix}=await import('../src/stats-export.js');
+ await user(1n);await user(99n);
+ const sent:string[]=[],edited:string[]=[],pinned:number[]=[];let failPin=true;
+ const api={
+  sendMessage:async(chat:string,text:string,options:{disable_notification?:boolean})=>{assert.equal(chat,'99');assert.equal(options.disable_notification,true);sent.push(text);return {message_id:123};},
+  editMessageText:async(_chat:string,id:number,text:string)=>{assert.equal(id,123);edited.push(text);},
+  pinChatMessage:async(_chat:string,id:number)=>{pinned.push(id);if(failPin){failPin=false;throw new Error('Temporary Telegram failure');}},
+ };
+ await assert.rejects(exportStats(db,api as never,'99'),/Temporary/);
+ await exportStats(db,api as never,'99');assert.equal(sent.length,1);assert.equal(edited.length,1);assert.deepEqual(pinned,[123,123]);
+ const report=JSON.parse(sent[0]!.slice(statsPrefix.length));assert.equal(report.totals.registeredUsers,1);assert.equal(report.daily.length,15);
+ assert.deepEqual(Object.keys(report.totals).sort(),['enabledAlertUsers','registeredUsers']);
+ const pointer=await db.task.findUniqueOrThrow({where:{dedupeKey:'stats-message:99'}});assert.equal(pointer.status,'held');
+});

@@ -2,7 +2,7 @@ import { DateTime } from 'luxon';
 import type { Db } from './db.js';
 
 // Read-only aggregates. No public endpoint, raw messages or account IDs in the report.
-export async function adminStats(db:Db,adminId:bigint,now=new Date()) {
+export async function collectStats(db:Db,adminId:bigint,now=new Date()) {
  const today=DateTime.fromJSDate(now,{zone:'Asia/Shanghai'}).startOf('day');
  const start=today.minus({days:14}).toJSDate(),end=today.plus({days:1}).toJSDate();
  const snapshot=await db.$transaction(async tx=>{
@@ -30,6 +30,12 @@ export async function adminStats(db:Db,adminId:bigint,now=new Date()) {
   const activity=snapshot.activity.find(r=>r.day===day);
   return {day,newUsers:Number(snapshot.newly.find(r=>r.day===day)?.count??0),active:Number(activity?.active??0),interactions:Number(activity?.interactions??0)};
  });
+ return {version:1,service:'remote-job-radar',timezone:'Asia/Shanghai',generatedAt:now.toISOString(),reportDate:daily[13]!.day,
+  totals:{registeredUsers:snapshot.users,enabledAlertUsers:snapshot.alerts},weeklyActive:snapshot.weekly,daily};
+}
+export async function adminStats(db:Db,adminId:bigint,now=new Date()) {
+ const report=await collectStats(db,adminId,now),daily=report.daily;
+ const snapshot={users:report.totals.registeredUsers,alerts:report.totals.enabledAlertUsers,weekly:report.weeklyActive};
  const previous=daily.slice(0,7),week=daily.slice(7,14),yesterday=daily[13]!,current=daily[14]!;
  const sum=(days:typeof daily,key:'newUsers'|'interactions')=>days.reduce((n,d)=>n+d[key],0);
  const change=(current:number,previous:number)=>previous?`${current>previous?'+':''}${Math.round((current-previous)*100/previous)}%`:(current?'up from 0':'no change');
