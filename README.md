@@ -1,13 +1,31 @@
 # Remote Job Radar
 
-An English Telegram bot for finding remote jobs and receiving daily subscription digests. Job listings are provided by [Jobicy](https://jobicy.com/jobs-rss-feed); application links return to the original Jobicy listing.
+An English-language Telegram bot for discovering remote roles and receiving a daily digest matched to your preferences. Listings come from [Jobicy](https://jobicy.com/jobs-rss-feed), and every application link points to the original listing.
 
-TypeScript · Node.js 24 · grammY · Fastify · PostgreSQL 17 · Prisma.
+[Open the bot](https://t.me/GelatoniJobRadarBot) · [Operations guide](docs/operations.md) · [Data source and matching](docs/source.md)
 
-Bot: [@GelatoniJobRadarBot](https://t.me/GelatoniJobRadarBot).
+## What it does
 
-See [operations](docs/operations.md) for setup, deployment, backups, migration and shutdown, and [source limits](docs/source.md) for matching and delivery behavior.
+- Browse remote roles by keyword, category, and location.
+- Save subscription preferences and receive a daily digest.
+- Deduplicate listings and retain delivery state so digests remain useful and consistent.
+- Link back to Jobicy for the full listing and application details.
 
-Run Node 24 + pnpm 10.32.1; install, generate Prisma client, migrate an isolated PostgreSQL 17 test database, then run typecheck, tests and build. See `.env.example` and `infra/compose.local.yml`.
+## Built with
 
-This repository is public. No open source license has been selected yet.
+TypeScript · Node.js 24 · grammY · Fastify · PostgreSQL 17 · Prisma
+
+## Run locally
+
+Use Node.js 24 and pnpm 10.32.1. Copy `.env.example`, start the isolated PostgreSQL service in `infra/compose.local.yml`, then install dependencies and prepare the database:
+
+```sh
+pnpm install
+pnpm db:generate
+pnpm db:migrate
+pnpm typecheck
+pnpm test
+pnpm build
+```
+
+See the [operations guide](docs/operations.md) for configuration, deployment, backups, migrations, and shutdown. The repository does not currently declare an open-source license.
