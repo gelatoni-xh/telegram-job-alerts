@@ -11,6 +11,7 @@ import { generateDigest,deliverDigest,scheduleUsers } from '../src/digests.js';
 import { enqueue,claim,runOne } from '../src/tasks.js';
 import { createHttp } from '../src/http.js';
 import { createBot } from '../src/bot.js';
+import { adminStats } from '../src/stats.js';
 import { deleteUser,replayDeletions } from '../src/privacy.js';
 import type { Update } from 'grammy/types';
 const url=process.env.TEST_DATABASE_URL;
@@ -109,8 +110,8 @@ test('deletion removes identifiable data and journal prevents resurrection from 
  try{await deleteUser(db,1n,journal);assert.equal(await db.user.count(),0);await user();await replayDeletions(db,journal,backup);assert.equal(await db.user.count(),0);}finally{await rm(dir,{recursive:true,force:true});}
 });
 type TestMessage={text:string;parse_mode?:string;reply_markup?:{inline_keyboard:{text:string;callback_data?:string;url?:string}[][]}};
-function telegramSession(){
- const bot=createBot(db,config,{botInfo:{id:123456,is_bot:true,first_name:'Local test',username:'local_test_bot',can_join_groups:false,can_read_all_group_messages:false,supports_inline_queries:false,can_connect_to_business:false,has_main_web_app:false,has_topics_enabled:false,allows_users_to_create_topics:false,can_manage_bots:false,supports_join_request_queries:false}});
+function telegramSession(botConfig=config){
+ const bot=createBot(db,botConfig,{botInfo:{id:123456,is_bot:true,first_name:'Local test',username:'local_test_bot',can_join_groups:false,can_read_all_group_messages:false,supports_inline_queries:false,can_connect_to_business:false,has_main_web_app:false,has_topics_enabled:false,allows_users_to_create_topics:false,can_manage_bots:false,supports_join_request_queries:false}});
  const messages:TestMessage[]=[],answers:{text?:string;show_alert?:boolean}[]=[];
  bot.api.config.use(async(_prev,method,payload)=>{
   if(method==='answerCallbackQuery'){answers.push(payload as never);return {ok:true,result:true} as never;}
@@ -201,4 +202,44 @@ test('source outage delivers recently verified jobs and defers outdated jobs',as
  assert.match(sent,/Engineer 1/);assert.doesNotMatch(sent,/Engineer 2/);assert.match(sent,/updates delayed/i);
  assert.equal((await db.delivery.findUniqueOrThrow({where:{id:delivery.id}})).status,'sent');
  assert.equal(await db.deferredMatch.count({where:{jobId:'jobicy:2'}}),1);
+});
+
+test('admin stats: authorization fails closed, works only in private chat and preserves the search',async()=>{
+ const denied=telegramSession();await denied.send('/stats');assert.match(denied.text(),/only available to the administrator/);assert.equal(await db.user.count(),0);
+ const wrong=telegramSession({...config,ADMIN_TELEGRAM_ID:'100'});await wrong.send('/stats');assert.match(wrong.text(),/only available to the administrator/);assert.equal(await db.user.count(),0);
+ const adminConfig={...config,ADMIN_TELEGRAM_ID:'99'},t=telegramSession(adminConfig);
+ await t.send('/start');await t.click('find');const before=await db.user.findUniqueOrThrow({where:{id:99n}});
+ await t.send('/stats');assert.match(t.text(),/Admin stats/);assert.match(t.text(),/Registered users: 0/);
+ assert.deepEqual((await db.user.findUniqueOrThrow({where:{id:99n}})).interaction,before.interaction);
+ const group=createBot(db,adminConfig,{botInfo:{id:123456,is_bot:true,first_name:'Test',username:'local_test_bot'}} as never);
+ group.api.config.use(async()=>{throw new Error('Must not reply with statistics in a group');});
+ await group.handleUpdate({update_id:500,message:{message_id:1,date:1,from:{id:99,is_bot:false,first_name:'Admin'},chat:{id:-10,type:'group',title:'Test'},text:'/stats'}});
+});
+
+test('admin stats: Shanghai midnight, weekly unique users, retries and all exclusions',async()=>{
+ const now=new Date('2026-11-04T03:00:00Z');
+ await db.user.createMany({data:[
+  {id:1n,chatId:1n,createdAt:new Date('2026-11-02T16:00:00Z')},
+  {id:2n,chatId:2n,createdAt:new Date('2026-11-03T16:00:00Z'),paused:true},
+  {id:3n,chatId:3n,createdAt:new Date('2026-10-01T00:00:00Z'),unreachable:true},
+  {id:99n,chatId:99n,createdAt:new Date('2026-11-03T00:00:00Z')},
+ ]});
+ for(const id of [1n,2n,3n,99n])await saveSubscription(db,id,filters);
+ const rows=[
+  {id:1n,chatId:1n,status:'done',createdAt:new Date('2026-11-02T16:00:00Z')},
+  {id:2n,chatId:1n,status:'done',createdAt:new Date('2026-11-03T15:59:59Z')},
+  {id:3n,chatId:1n,status:'done',createdAt:new Date('2026-11-01T00:00:00Z')},
+  {id:4n,chatId:2n,status:'done',createdAt:new Date('2026-11-03T16:00:00Z')},
+  {id:5n,chatId:99n,status:'done',createdAt:new Date('2026-11-03T00:00:00Z')},
+  {id:6n,chatId:1n,status:'pending',createdAt:new Date('2026-11-03T00:00:00Z')},
+  {id:7n,chatId:900n,status:'done',createdAt:new Date('2026-11-03T00:00:00Z')},
+ ];
+ await db.inboxUpdate.createMany({data:rows});
+ await db.inboxUpdate.createMany({data:rows,skipDuplicates:true});
+ const report=await adminStats(db,99n,now);
+ assert.match(report,/Yesterday · 2026-11-03\nNew users: 1\nActive users: 1\nInteractions: 2/);
+ assert.match(report,/Today so far · 2026-11-04\nNew \/ active \/ interactions: 1 \/ 1 \/ 1/);
+ assert.match(report,/Active users: 1 \(deduplicated across 7 days\)/);
+ assert.match(report,/Interactions: 3 \(up from 0/);
+ assert.match(report,/Registered users: 3\nUsers with enabled alerts: 1/);
 });

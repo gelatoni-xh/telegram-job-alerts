@@ -1,6 +1,7 @@
 import { Bot, InlineKeyboard, GrammyError, type Context } from 'grammy';
 import type { Db } from './db.js';
 import type { Config } from './config.js';
+import { adminStats } from './stats.js';
 import { snippet, type Filters } from './rules.js';
 import { jobFilterOptions,searchJobs } from './jobs.js';
 import { saveSubscription,setPaused,pauseAll,setSchedule } from './subscriptions.js';
@@ -161,6 +162,11 @@ export function createBot(db:Db,config:Config,botInfo?:ConstructorParameters<typ
   await view(ctx,`About Remote Job Radar\n\nFree remote job search and daily alerts.\n\nSource · Jobicy\nActive jobs · ${count.toLocaleString('en')}\n${updatedAt(latest?.finishedAt)}\n\nWe link to original listings. The source feed covers recent jobs with a delay; older stored jobs are checked separately. A country with few results stays available.\n\nMatching a country is not a visa or work-rights check. Always read the employer’s requirements.`,kb);
  }
  bot.on('message:text',async ctx=>{
+  if(/^\/stats(?:@\w+)?(?:\s|$)/.test(ctx.message.text.trim())){
+   if(ctx.chat.type!=='private')return;
+   if(!config.ADMIN_TELEGRAM_ID||String(ctx.from.id)!==config.ADMIN_TELEGRAM_ID)return ctx.reply('This command is only available to the administrator.');
+   return ctx.reply(await adminStats(db,BigInt(config.ADMIN_TELEGRAM_ID)),{link_preview_options:{is_disabled:true}});
+  }
   const foundUser=await user(ctx);if(!foundUser)return;let u:User=foundUser;const text=ctx.message.text.trim(),s=state(u);
   if(/^\/start(?:@\w+)?(?:\s|$)/.test(text)||['/menu','/cancel'].includes(text)){u=await put(db,u,{...s,step:'home',pendingSubscribe:false});await event(ctx,u,'start');return menu(ctx,u);}
   if(text==='/privacy')return privacy(ctx,u);

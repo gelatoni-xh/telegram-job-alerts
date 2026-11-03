@@ -102,3 +102,11 @@ docker compose --env-file release.env run --rm --no-deps app node dist/src/cli.j
 ```
 
 This updates menu metadata without sending messages to users.
+
+## Private Telegram statistics
+
+Set `ADMIN_TELEGRAM_ID` in the protected runtime environment to the owner's numeric Telegram user ID (not an `@username`). Leave it unset to disable `/stats`. This setting is an identity allowlist, not a password; no additional API secret or analytics service is needed. Keep the real value out of the repository and public documentation. Recreate the application after changing its environment, then run the `commands` management operation in a separate temporary container to add `/stats` to that owner's private-chat command menu. The public command menu remains unchanged. When changing owners, remove the old owner's chat-scoped commands with Telegram `deleteMyCommands`; authorization always follows the current runtime setting.
+
+In the bot's private chat, `/stats` returns yesterday, today so far, seven complete days with daily trends and a comparison to the previous seven days, plus current registered users and users with enabled alerts. Time boundaries use `Asia/Shanghai`. The command is read-only and preserves the current search. Other users receive a generic denial; group commands produce no report. Only Telegram is used to view the report; there is no HTTP statistics endpoint, external database connection, SSH collection job or automatic report broadcast.
+
+New users are currently retained accounts grouped by registration date. Active users are distinct retained users with at least one completed private-chat inbox update, grouped by receipt time; interactions count those deduplicated updates, including messages/buttons and navigation. Unique update IDs exclude Telegram retries, and pending updates do not count. Automatic digests do not count as activity. The configured administrator is excluded from all figures. Enabled-alert users must have at least one unpaused subscription and must not be globally paused or unreachable. Inbox IDs are retained for 30 days, enough for the displayed 14 complete days; deleting accounts removes them from historical figures. These are observed activity counts, not an uptime check or immutable lifetime totals. No per-user identifiers or message contents are returned.
