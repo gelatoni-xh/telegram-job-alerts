@@ -36,16 +36,20 @@ export async function collectStats(db:Db,adminId:bigint,now=new Date()) {
 export async function adminStats(db:Db,adminId:bigint,now=new Date()) {
  const report=await collectStats(db,adminId,now),daily=report.daily;
  const snapshot={users:report.totals.registeredUsers,alerts:report.totals.enabledAlertUsers,weekly:report.weeklyActive};
- const previous=daily.slice(0,7),week=daily.slice(7,14),yesterday=daily[13]!,current=daily[14]!;
+ const previous=daily.slice(0,7),week=daily.slice(7,14),before=daily[12]!,yesterday=daily[13]!,current=daily[14]!;
  const sum=(days:typeof daily,key:'newUsers'|'interactions')=>days.reduce((n,d)=>n+d[key],0);
  const change=(current:number,previous:number)=>previous?`${current>previous?'+':''}${Math.round((current-previous)*100/previous)}%`:(current?'up from 0':'no change');
  return [
   'Remote Job Radar · Admin stats',
   `Asia/Shanghai · ${DateTime.fromJSDate(now,{zone:'Asia/Shanghai'}).toFormat('yyyy-MM-dd HH:mm')}`,
+  '',`Day before yesterday · ${before.day}`,
+  `New / active / interactions: ${before.newUsers} / ${before.active} / ${before.interactions}`,
   '',`Yesterday · ${yesterday.day}`,
   `New users: ${yesterday.newUsers}`,
   `Active users: ${yesterday.active}`,
   `Interactions: ${yesterday.interactions}`,
+  '', 'Yesterday vs day before yesterday',
+  ...(['newUsers','active','interactions'] as const).map((key,i)=>`${['New users','Active users','Interactions'][i]}: ${yesterday[key]-before[key]>0?'+':''}${yesterday[key]-before[key]} (${change(yesterday[key],before[key])})`),
   '',`Today so far · ${current.day}`,
   `New / active / interactions: ${current.newUsers} / ${current.active} / ${current.interactions}`,
   '',`Last 7 complete days · ${week[0]!.day} – ${yesterday.day}`,
