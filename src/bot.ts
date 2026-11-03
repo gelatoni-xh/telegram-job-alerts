@@ -34,11 +34,14 @@ export function createBot(db:Db,config:Config,botInfo?:ConstructorParameters<typ
   const p=Math.max(0,Math.min(page,Math.max(0,Math.ceil(options.length/8)-1))),shown=options.slice(p*8,p*8+8);
   u=await put(db,u,{...s,step:kind,query,page:p,choices:shown.map(v=>v.key)});
   const selected=kind==='country'?f.countries:f.categories,kb=new InlineKeyboard();
-  button(kb,u,`${selected.length?'':'✓ '}Any ${kind==='country'?'country':'occupation'}`,'any',kind).row();
-  shown.forEach((v,i)=>{button(kb,u,`${selected.includes(v.key)?'✓ ':''}${v.name}`,'pick',String(i)).row();});
-  if(p>0)button(kb,u,'Previous','selectpage',String(p-1));if((p+1)*8<options.length)button(kb,u,'Next','selectpage',String(p+1));kb.row();
-  button(kb,u,'Search names','lookup',kind).row();button(kb,u,'Continue',kind==='country'?'category':'keyword').row();button(kb,u,'Main menu','menu');
-  await view(ctx,`Choose ${kind==='country'?'countries':'occupations'} (multiple allowed).\nSelected: ${selected.join(', ')||'Any'}\n${options.length} options${query?` for “${query}”`:''}. Page ${p+1}.`,kb);
+  button(kb,u,`${selected.length?'☐':'☑'} Any ${kind==='country'?'country':'occupation'}`,'any',kind);if(!selected.length)kb.success();kb.row();
+  shown.forEach((v,i)=>{const checked=selected.includes(v.key);button(kb,u,`${checked?'☑':'☐'} ${v.name}`,'pick',String(i));if(checked)kb.success();kb.row();});
+  if(p>0)button(kb,u,'‹ Previous page','selectpage',String(p-1));if((p+1)*8<options.length)button(kb,u,'Next page ›','selectpage',String(p+1));kb.row();
+  button(kb,u,`🔎 Search ${kind==='country'?'countries':'occupations'}`,'lookup',kind).row();
+  button(kb,u,`Continue → ${kind==='country'?'Occupations':'Keyword'}`,kind==='country'?'category':'keyword').primary().row();
+  button(kb,u,'↩ Main menu','menu');
+  const selectedNames=selected.map(key=>actual.find(option=>option.key===key)?.name??key);
+  await view(ctx,`Step ${kind==='country'?'1':'2'} of 3 · ${kind==='country'?'Where do you live?':'Choose occupations'}\n${kind==='country'?'Select your country of residence to match job location requirements.':'You can select more than one occupation.'}\n\n☑ Selected · ☐ Not selected\nSelected: ${selectedNames.join(', ')||'Any'}\n\nTap options to select or unselect, then tap Continue.\n${options.length} options${query?` for “${query}”`:''} · Page ${p+1} of ${Math.max(1,Math.ceil(options.length/8))}.`,kb);
  }
  async function categoryOptions(){const rows=await db.$queryRaw<{name:string}[]>`SELECT DISTINCT unnest(categories) AS name FROM "Job"`;return [...new Set([...categories,...rows.map(r=>r.name)])].sort().map(name=>({key:name,name}));}
  async function keyword(ctx:Context,u:User){u=await put(db,u,{...state(u),step:'keyword'});const kb=new InlineKeyboard();button(kb,u,'Skip keyword','skip').row();button(kb,u,'Back to occupations','category');await view(ctx,'Send an optional keyword or phrase (title or description). Matching is literal and ignores case. Or skip it.',kb);}
