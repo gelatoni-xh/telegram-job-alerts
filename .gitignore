@@ -9,3 +9,12 @@ dist/
 coverage/
 .secrets/
 release.env
+.env.migration
+.env.production
+.ops.conf
+.deploy.lock
+previous-release.env
+next-release.env
+backups/
+state/
+releases/

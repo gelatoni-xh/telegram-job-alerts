@@ -1,0 +1,30 @@
+name: telegram-job-alerts
+services:
+  app:
+    image: ${APP_IMAGE:?APP_IMAGE must be set}
+    env_file: .env.production
+    environment:
+      NODE_OPTIONS: --max-old-space-size=96
+      DELETION_JOURNAL_PATH: /app/state/deletions.jsonl
+    ports: ["127.0.0.1:3050:3000"]
+    volumes: ["./state:/app/state"]
+    networks: [shared_db]
+    mem_limit: 192m
+    cpus: 0.5
+    restart: unless-stopped
+    stop_grace_period: 30s
+    logging:
+      driver: local
+      options: {max-size: "10m", max-file: "3"}
+  migrate:
+    profiles: [tools]
+    image: ${APP_IMAGE:?APP_IMAGE must be set}
+    env_file: .env.migration
+    networks: [shared_db]
+    mem_limit: 192m
+    command: ["pnpm", "db:migrate"]
+    restart: "no"
+networks:
+  shared_db:
+    external: true
+    name: ${DATABASE_NETWORK:-tasuki-keifu_default}

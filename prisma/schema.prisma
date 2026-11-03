@@ -1,0 +1,152 @@
+generator client {
+  provider = "prisma-client-js"
+}
+datasource db {
+  provider = "postgresql"
+}
+model User {
+  id BigInt @id
+  chatId BigInt @unique
+  timezone String @default("UTC")
+  timezoneConfirmed Boolean @default(false)
+  sendTime String @default("09:00")
+  paused Boolean @default(false)
+  unreachable Boolean @default(false)
+  nextDue DateTime?
+  interaction Json @default("{}")
+  interactionVersion Int @default(0)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  subscriptions Subscription[]
+  digests Digest[]
+}
+model Subscription {
+  id String @id @default(cuid())
+  userId BigInt
+  user User @relation(fields:[userId], references:[id], onDelete:Cascade)
+  name String
+  countries String[]
+  categories String[]
+  keyword String @default("")
+  filterHash String
+  revision Int @default(1)
+  paused Boolean @default(false)
+  watermark BigInt @default(0)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  @@unique([userId, filterHash])
+}
+model DiscoveryCounter {
+  id Int @id @default(1)
+  value BigInt @default(0)
+}
+model Job {
+  id String @id
+  source String @default("jobicy")
+  externalId String
+  discovery BigInt @unique
+  title String
+  company String
+  description String
+  geo String
+  countries String[]
+  categories String[]
+  restrictions Json @default("{}")
+  url String
+  salary String?
+  publishedAt DateTime?
+  firstSeenAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  status String @default("active")
+  checkedAt DateTime @default(now())
+  items DigestItem[]
+  @@unique([source, externalId])
+  @@index([status, publishedAt])
+  @@index([checkedAt])
+}
+model SyncRun {
+  id String @id @default(cuid())
+  status String @default("running")
+  cursor String?
+  pages Int @default(0)
+  jobs Int @default(0)
+  startedAt DateTime @default(now())
+  finishedAt DateTime?
+  error String?
+  @@index([status, startedAt])
+}
+model InboxUpdate {
+  id BigInt @id
+  chatId BigInt
+  payload Json?
+  status String @default("pending")
+  createdAt DateTime @default(now())
+  processedAt DateTime?
+  @@index([chatId, status, id])
+}
+model Task {
+  id String @id @default(cuid())
+  type String
+  dedupeKey String @unique
+  payload Json @default("{}")
+  dueAt DateTime @default(now())
+  status String @default("pending")
+  attempts Int @default(0)
+  leaseUntil DateTime?
+  leaseToken String?
+  error String?
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  @@index([status, dueAt])
+}
+model Digest {
+  id String @id @default(cuid())
+  userId BigInt
+  user User @relation(fields:[userId],references:[id],onDelete:Cascade)
+  localDate String
+  timezone String
+  status String @default("generated")
+  createdAt DateTime @default(now())
+  items DigestItem[]
+  delivery Delivery?
+  @@unique([userId, localDate])
+}
+model DigestItem {
+  id String @id @default(cuid())
+  digestId String
+  digest Digest @relation(fields:[digestId],references:[id],onDelete:Cascade)
+  jobId String
+  job Job @relation(fields:[jobId],references:[id])
+  position Int
+  matches Json
+  @@unique([digestId, jobId])
+  @@index([digestId, position])
+}
+model Delivery {
+  id String @id @default(cuid())
+  digestId String @unique
+  digest Digest @relation(fields:[digestId],references:[id],onDelete:Cascade)
+  status String @default("pending")
+  attempts Int @default(0)
+  messageId BigInt?
+  nextAttemptAt DateTime @default(now())
+  error String?
+  updatedAt DateTime @updatedAt
+}
+model DeferredMatch {
+  id String @id @default(cuid())
+  subscriptionId String
+  revision Int
+  jobId String
+  @@unique([subscriptionId, revision, jobId])
+}
+model Event {
+  id String @id @default(cuid())
+  key String @unique
+  type String
+  userId BigInt?
+  dimensions Json @default("{}")
+  createdAt DateTime @default(now())
+  @@index([createdAt])
+  @@index([userId])
+}

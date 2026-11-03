@@ -1,18 +1,44 @@
 {
-  "name":"telegram-job-alerts","version":"0.1.0","private":true,"type":"module",
-  "engines":{"node":">=24 <25"},"packageManager":"pnpm@10.32.1",
-  "scripts":{
-    "dev":"tsx watch --env-file=.env src/main.ts",
-    "build":"tsc",
-    "typecheck":"tsc --noEmit",
-    "lint":"tsc --noEmit",
-    "test":"tsx --test tests/*.test.ts",
-    "start":"node dist/src/main.js",
-    "db:generate":"prisma generate",
-    "db:migrate":"prisma migrate deploy",
-    "ops:doctor":"node dist/src/cli.js doctor",
-    "ops:sync":"node dist/src/cli.js sync",
-    "ops:webhook":"node dist/src/cli.js webhook",
-    "ops:status":"node dist/src/cli.js status"
+  "name": "telegram-job-alerts",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "engines": {
+    "node": ">=24 <25"
+  },
+  "packageManager": "pnpm@10.32.1",
+  "scripts": {
+    "dev": "tsx watch --env-file=.env src/main.ts",
+    "build": "tsc",
+    "typecheck": "tsc --noEmit",
+    "lint": "tsc --noEmit",
+    "test": "tsx --test tests/*.test.ts",
+    "start": "node dist/src/main.js",
+    "db:generate": "prisma generate",
+    "db:migrate": "prisma migrate deploy",
+    "ops:doctor": "node dist/src/cli.js doctor",
+    "ops:sync": "node dist/src/cli.js sync",
+    "ops:webhook": "node dist/src/cli.js webhook",
+    "ops:status": "node dist/src/cli.js status"
+  },
+  "dependencies": {
+    "@prisma/adapter-pg": "7.8.0",
+    "@prisma/client": "7.8.0",
+    "fastify": "^5.12.8",
+    "grammy": "^1.46.0",
+    "html-to-text": "^10.0.1",
+    "i18n-iso-countries": "^7.14.0",
+    "luxon": "^3.7.2",
+    "pg": "^8.23.1",
+    "zod": "^4.6.7",
+    "prisma": "7.8.0"
+  },
+  "devDependencies": {
+    "@types/html-to-text": "^9.0.4",
+    "@types/luxon": "^3.7.6",
+    "@types/node": "^26.6.6",
+    "@types/pg": "^8.23.1",
+    "tsx": "^4.23.15",
+    "typescript": "^7.0.2"
   }
 }

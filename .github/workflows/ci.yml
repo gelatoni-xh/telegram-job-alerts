@@ -1,0 +1,81 @@
+name: Check and deploy
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:17-alpine
+        env:
+          POSTGRES_DB: telegram_job_alerts_test
+          POSTGRES_PASSWORD: local-development-only
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd "pg_isready -U postgres" --health-interval 5s --health-timeout 5s --health-retries 10
+    env:
+      DATABASE_URL: postgresql://postgres:local-development-only@127.0.0.1:5432/telegram_job_alerts_test
+      TEST_DATABASE_URL: postgresql://postgres:local-development-only@127.0.0.1:5432/telegram_job_alerts_test
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10.32.1
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24.22.2
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm db:generate
+      - run: pnpm db:migrate
+      - run: pnpm typecheck && pnpm test && pnpm build
+      - run: docker build -t telegram-job-alerts:${{ github.sha }} .
+      - if: github.ref == 'refs/heads/main' && github.event_name != 'pull_request' && vars.DEPLOY_ENABLED == 'true'
+        run: docker save telegram-job-alerts:${{ github.sha }} | gzip > image.tar.gz
+      - if: github.ref == 'refs/heads/main' && github.event_name != 'pull_request' && vars.DEPLOY_ENABLED == 'true'
+        uses: actions/upload-artifact@v4
+        with:
+          name: production-image
+          path: image.tar.gz
+          retention-days: 1
+  deploy:
+    needs: check
+    if: github.ref == 'refs/heads/main' && github.event_name != 'pull_request' && vars.DEPLOY_ENABLED == 'true'
+    runs-on: ubuntu-latest
+    environment: production
+    concurrency:
+      group: telegram-job-alerts-production
+      cancel-in-progress: false
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          name: production-image
+      - name: Upload and deploy
+        env:
+          SSH_HOST: ${{ secrets.UBUNTU3_HOST }}
+          SSH_USER: ${{ secrets.UBUNTU3_USER }}
+          SSH_KEY: ${{ secrets.UBUNTU3_SSH_KEY }}
+          SSH_KNOWN_HOSTS: ${{ secrets.UBUNTU3_KNOWN_HOSTS }}
+          RELEASE_SHA: ${{ github.sha }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          umask 077
+          mkdir -p ~/.ssh
+          printf '%s\n' "$SSH_KEY" > ~/.ssh/deploy
+          printf '%s\n' "$SSH_KNOWN_HOSTS" > ~/.ssh/known_hosts
+          trap 'rm -f ~/.ssh/deploy' EXIT
+          sha256sum image.tar.gz > image.tar.gz.sha256
+          remote="$SSH_USER@$SSH_HOST"
+          upload="/opt/apps/telegram-job-alerts/releases/$RELEASE_SHA"
+          ssh -i ~/.ssh/deploy "$remote" "mkdir -p '$upload'"
+          tar -czf deploy-files.tar.gz infra scripts
+          scp -i ~/.ssh/deploy image.tar.gz image.tar.gz.sha256 deploy-files.tar.gz "$remote:$upload/"
+          ssh -i ~/.ssh/deploy "$remote" "cd '$upload' && sha256sum -c image.tar.gz.sha256 && gzip -dc image.tar.gz | docker load"
+          ssh -i ~/.ssh/deploy "$remote" "cd /opt/apps/telegram-job-alerts && tar -xzf 'releases/$RELEASE_SHA/deploy-files.tar.gz' && cp infra/compose.yml compose.yml && ./scripts/deploy.sh '$RELEASE_SHA'"
