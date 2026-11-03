@@ -1,3 +1,4 @@
+import { screenHtml } from './ui.js';
 import { InlineKeyboard } from 'grammy';
 import type { Update } from 'grammy/types';
 import { readConfig } from './config.js';
@@ -29,7 +30,7 @@ async function worker(types:string[]) {
     case 'sync':await syncSource(db);break;
     case 'status':{let pages=0;while(!stopped&&pages++<100){const n=await db.job.count({where:{status:{not:'closed'},checkedAt:{lt:new Date(Date.now()-3600_000)}}});if(!n)break;await checkStatuses(db);}break;}
     case 'digest':await generateDigest(db,BigInt(p.userId!));break;
-    case 'deliver':if(!bot||!config.DELIVERY_ENABLED)throw new Error('Delivery is disabled');await deliverDigest(db,p.id!,{send:async(chat,text,id)=>(await bot.api.sendMessage(String(chat),text,{reply_markup:new InlineKeyboard().text('View all',`D|${id}|0`),link_preview_options:{is_disabled:true}})).message_id});break;
+    case 'deliver':if(!bot||!config.DELIVERY_ENABLED)throw new Error('Delivery is disabled');await deliverDigest(db,p.id!,{send:async(chat,text,id)=>(await bot.api.sendMessage(String(chat),screenHtml(text),{parse_mode:'HTML',reply_markup:new InlineKeyboard().text('View daily matches →',`D|${id}|0`),link_preview_options:{is_disabled:true}})).message_id});break;
     case 'cleanup':await cleanup(db);break;
    }
   });

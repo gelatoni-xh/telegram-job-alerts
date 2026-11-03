@@ -92,3 +92,13 @@ Only delete old image/archive resources bearing this project's name after confir
 4. Make a final verified backup and record an explicit retention/deletion date. Revoke this project's CI SSH key.
 5. Remove this project's container and optional tagged images/archives. Preserve shared PostgreSQL, its network and volume.
 6. Database/role/backup destruction is irreversible and separate from stopping the service. Verify dependencies and retention before a later authorized deletion.
+
+### Telegram command menu
+
+After changing command descriptions, update Telegram’s command picker with an independent management container:
+
+```sh
+docker compose --env-file release.env run --rm --no-deps app node dist/src/cli.js commands
+```
+
+This updates menu metadata without sending messages to users.

@@ -1,7 +1,8 @@
+import { jobCard,updatedAt,clip } from './ui.js';
 import { Prisma, type DigestItem, type Job } from '@prisma/client';
 import type { Db } from './db.js';
 import { boundary,lockUser } from './db.js';
-import { localDate,nextDue,snippet } from './rules.js';
+import { localDate,nextDue } from './rules.js';
 import { matchSql,checkStatuses } from './jobs.js';
 import { enqueue,safeError } from './tasks.js';
 export type Match={id:string;revision:number;name:string;keyword?:string};
@@ -93,7 +94,7 @@ export async function deliverDigest(db:Db,id:string,messenger:Messenger,now=new 
  if(!retained.length){await db.delivery.update({where:{id:prepared.deliveryId},data:{status:'cancelled'}});return;}
  const live=await db.user.findUnique({where:{id:userId}});if(!live||live.paused||live.unreachable)return;
  const source=await db.syncRun.findFirst({where:{status:'complete'},orderBy:{finishedAt:'desc'}});
- const text=`${retained.length} new matching job${retained.length===1?'':'s'}\n\n${retained.slice(0,3).map((i,n)=>`${n+1}. ${i.job.title.slice(0,150)} — ${i.job.company.slice(0,80)}\n${i.job.geo}\n${i.job.salary??'Salary not specified'}\n${i.job.publishedAt?'Published '+i.job.publishedAt.toISOString().slice(0,10):'Discovered '+i.job.firstSeenAt.toISOString().slice(0,10)}\n${snippet(i.job.description,(i.matches as Match[]).map(m=>m.keyword??'').find(Boolean)??'',100)}\n${(i.matches as Match[]).map(m=>m.name).join('; ').slice(0,140)}`).join('\n\n')}\n\nSource: Jobicy. View all to see every match.\nLast complete sync: ${source?.finishedAt?.toISOString()??'not yet complete'}${refreshDelayed||!source?.finishedAt||now.getTime()-source.finishedAt.getTime()>2*3600_000?' — updates delayed':''}`;
+ const text=`Your daily job radar\n\n${retained.length} new matching job${retained.length===1?'':'s'}\n\n${retained.slice(0,3).map((i,n)=>`${jobCard(i.job,n+1,(i.matches as Match[]).map(m=>m.keyword??'').find(Boolean)??'')}\nAlert · ${clip((i.matches as Match[]).map(m=>m.name).join('; '),140)}`).join('\n\n')}\n\n${retained.length>3?`Preview of 3 · Open your daily matches for all ${retained.length} roles.`:'Open your daily matches to see details and apply.'}\nJobicy · ${updatedAt(source?.finishedAt)}${refreshDelayed||!source?.finishedAt||now.getTime()-source.finishedAt.getTime()>2*3600_000?' · Updates delayed':''}`;
  // Persist sending first: a crash after this point is an uncertain outcome, never an assumed success.
  await db.delivery.update({where:{id:prepared.deliveryId},data:{status:'sending',attempts:{increment:1}}});
  try {

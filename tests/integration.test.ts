@@ -108,18 +108,73 @@ test('deletion removes identifiable data and journal prevents resurrection from 
  await user();await saveSubscription(db,1n,filters);const dir=await mkdtemp(join(tmpdir(),'job-alerts-test-'));const journal=join(dir,'deletions.jsonl');const backup=new Date(Date.now()-1000);
  try{await deleteUser(db,1n,journal);assert.equal(await db.user.count(),0);await user();await replayDeletions(db,journal,backup);assert.equal(await db.user.count(),0);}finally{await rm(dir,{recursive:true,force:true});}
 });
-test('complete Telegram flow: search, keyword skip, timezone, daily time, subscribe, pause',async()=>{
- await page([1]);const bot=createBot(db,config,{botInfo:{id:123456,is_bot:true,first_name:'Local test',username:'local_test_bot',can_join_groups:false,can_read_all_group_messages:false,supports_inline_queries:false,can_connect_to_business:false,has_main_web_app:false,has_topics_enabled:false,allows_users_to_create_topics:false,can_manage_bots:false,supports_join_request_queries:false}});
- let messages:{text:string;reply_markup?:{inline_keyboard:{text:string;callback_data?:string}[][]}}[]=[];
+type TestMessage={text:string;parse_mode?:string;reply_markup?:{inline_keyboard:{text:string;callback_data?:string;url?:string}[][]}};
+function telegramSession(){
+ const bot=createBot(db,config,{botInfo:{id:123456,is_bot:true,first_name:'Local test',username:'local_test_bot',can_join_groups:false,can_read_all_group_messages:false,supports_inline_queries:false,can_connect_to_business:false,has_main_web_app:false,has_topics_enabled:false,allows_users_to_create_topics:false,can_manage_bots:false,supports_join_request_queries:false}});
+ const messages:TestMessage[]=[],answers:{text?:string;show_alert?:boolean}[]=[];
  bot.api.config.use(async(_prev,method,payload)=>{
-  if(method==='answerCallbackQuery')return {ok:true,result:true} as never;
-  const p=payload as {text?:string;reply_markup?:unknown};messages.push({text:p.text??'',reply_markup:p.reply_markup as never});
+  if(method==='answerCallbackQuery'){answers.push(payload as never);return {ok:true,result:true} as never;}
+  const p=payload as TestMessage;messages.push(p);
   return {ok:true,result:{message_id:1,date:1,chat:{id:99,type:'private'},text:p.text}} as never;
  });
  let id=1;const from={id:99,is_bot:false,first_name:'Tester'},chat={id:99,type:'private' as const,first_name:'Tester'};
- await bot.handleUpdate({update_id:id++,message:{message_id:1,date:1,from,chat,text:'/start'}});
- async function click(action:string,value?:string){const keys=messages.at(-1)!.reply_markup!.inline_keyboard.flat();const key=keys.find(k=>{const p=k.callback_data?.split('|');return p?.[1]===action&&(value===undefined||p[2]===value);});assert.ok(key,`missing ${action}: ${messages.at(-1)?.text}`);await bot.handleUpdate({update_id:id++,callback_query:{id:String(id),from,chat_instance:'test',data:key.callback_data,message:{message_id:1,date:1,chat,text:'menu'}}} as Update);}
- await click('find');await click('any','country');await click('category');await click('keyword');await click('skip');assert.match(messages.at(-1)!.text,/1 matching jobs/);await click('subscribe');assert.match(messages.at(-1)!.text,/timezone/i);await click('zone','0');await click('time','09:00');assert.equal(await db.subscription.count({where:{userId:99n}}),1);await click('pause');assert.equal((await db.subscription.findFirstOrThrow({where:{userId:99n}})).paused,true);
+ const send=(text:string)=>bot.handleUpdate({update_id:id++,message:{message_id:1,date:1,from,chat,text}});
+ const raw=(data:string)=>bot.handleUpdate({update_id:id++,callback_query:{id:String(id),from,chat_instance:'test',data,message:{message_id:1,date:1,chat,text:'menu'}}} as Update);
+ const keys=()=>messages.at(-1)!.reply_markup!.inline_keyboard.flat();
+ async function click(action:string,value?:string){const key=keys().find(k=>{const p=k.callback_data?.split('|');return p?.[1]===action&&(value===undefined||p[2]===value);});assert.ok(key,`missing ${action}: ${messages.at(-1)?.text}`);await raw(key.callback_data!);}
+ return {send,click,raw,keys,messages,answers,text:()=>messages.at(-1)!.text};
+}
+test('Telegram journey: refine search, save first alert, pause and resume',async()=>{
+ await page([1]);const t=telegramSession();await t.send('/start');await t.click('find');
+ assert.match(t.text(),/1 matching jobs/);await t.click('country');await t.click('pick','0');await t.click('filters');
+ assert.match(t.text(),/United States/);await t.click('category');await t.click('pick','0');await t.click('filters');
+ await t.click('keyword');await t.send('SaaS');assert.match(t.text(),/Keyword · SaaS/);await t.click('results');
+ await t.click('subscribe');assert.match(t.text(),/timezone/);await t.click('zone','0');await t.click('time','09:00');
+ assert.match(t.text(),/Alert saved/);assert.match(t.text(),/Only newly discovered/);
+ const sub=await db.subscription.findFirstOrThrow({where:{userId:99n}});assert.deepEqual(sub.countries,['US']);assert.equal(sub.keyword,'SaaS');
+ await t.click('pause');assert.match(t.text(),/Alert paused/);assert.equal((await db.subscription.findUniqueOrThrow({where:{id:sub.id}})).paused,true);
+ await t.click('resume');assert.equal((await db.subscription.findUniqueOrThrow({where:{id:sub.id}})).paused,false);
+});
+test('results and daily matches return to the same page after safe job details',async()=>{
+ await db.$transaction(tx=>savePage(tx,[job(1,{jobTitle:'Engineer <script> & researcher'}),...Array.from({length:5},(_,i)=>job(i+2))]));
+ await db.job.update({where:{id:'jobicy:1'},data:{title:'Engineer <script> & researcher'}});
+ const t=telegramSession();await t.send('/start');await t.click('find');await t.click('results');
+ assert.match(t.text(),/Engineer &lt;script&gt; &amp; researcher/);assert.equal(t.messages.at(-1)!.parse_mode,'HTML');
+ await t.click('resultpage','1');assert.match(t.text(),/Page 2 \/ 2/);await t.click('job');assert.ok(t.keys().some(k=>k.url?.startsWith('https://jobicy.com/')));
+ await t.click('backjobs');assert.match(t.text(),/Page 2 \/ 2/);
+ await db.user.update({where:{id:99n},data:{timezoneConfirmed:true}});
+ await saveSubscription(db,99n,filters);await page([7,8,9,10,11,12]);const d=await generateDigest(db,99n);
+ await t.raw(`D|${d!.id}|1`);assert.match(t.text(),/Page 2 \/ 2/);await t.click('job');await t.click('backjobs');assert.match(t.text(),/Your daily matches/);assert.match(t.text(),/Page 2 \/ 2/);
+});
+test('country search preserves picks, handles empty names, and callbacks use the rendered choices',async()=>{
+ await page([1,2]);const t=telegramSession();await t.send('/start');await t.click('find');await t.click('country');
+ await db.$transaction(tx=>savePage(tx,[job(3,{jobGeo:'Canada'}),job(4,{jobGeo:'Canada'}),job(5,{jobGeo:'Canada'})]));
+ await t.click('pick','0');let u=await db.user.findUniqueOrThrow({where:{id:99n}});assert.deepEqual((u.interaction as {filters:typeof filters}).filters.countries,['US']);
+ await t.click('lookup','country');await t.send('China');await t.click('pick','0');await t.click('filters');assert.match(t.text(),/China/);assert.match(t.text(),/United States/);
+ await t.click('country');await t.send('no such country');assert.match(t.text(),/No names match/);await t.click('clearlookup','country');assert.ok(t.keys().some(k=>k.text.includes('Canada')));
+ await t.click('filters');await t.click('menu');await t.click('filters');assert.match(t.text(),/China/);
+});
+test('zero results offer recovery and can be saved without fabricating matches',async()=>{
+ await page([1]);const t=telegramSession();await t.send('/start');await t.click('find');await t.click('keyword');await t.send('unavailable phrase');await t.click('results');
+ assert.match(t.text(),/No matches right now/);assert.ok(t.keys().some(k=>k.callback_data?.includes('|subscribe|')));await t.click('broadenkeyword');assert.match(t.text(),/1 matching jobs/);
+ await t.click('filters');await t.click('keyword');await t.send('unavailable phrase');await t.click('results');await t.click('subscribe');await t.click('zone','0');await t.click('time','09:00');
+ assert.equal((await db.subscription.findFirstOrThrow({where:{userId:99n}})).keyword,'unavailable phrase');
+});
+test('old buttons do not reset a new search; schedule cancellation does not save an alert',async()=>{
+ await page([1]);const t=telegramSession();await t.send('/start');const old=t.keys().find(k=>k.callback_data?.includes('|find|'))!.callback_data!;
+ await t.click('find');await t.click('keyword');await t.send('SaaS');const before=await db.user.findUniqueOrThrow({where:{id:99n}}),n=t.messages.length;
+ await t.raw(old);assert.equal(t.messages.length,n);assert.equal(t.answers.at(-1)!.show_alert,true);assert.equal((await db.user.findUniqueOrThrow({where:{id:99n}})).interactionVersion,before.interactionVersion);
+ await t.click('results');await t.click('subscribe');await t.click('results');assert.equal(await db.subscription.count(),0);
+ await t.click('menu');await t.click('settings');await t.click('timezone');await t.click('zone','0');await t.send('25:99');assert.match(t.text(),/valid 24-hour/);await t.click('time','12:00');assert.match(t.text(),/Delivery time updated/);assert.equal(await db.subscription.count(),0);
+ await t.send('09:00');assert.equal((await db.user.findUniqueOrThrow({where:{id:99n}})).sendTime,'12:00');
+});
+test('browsing an alert does not reset its boundary; editing is explicit and deletion is confirmed',async()=>{
+ await user(99n);await page([1]);const sub=await saveSubscription(db,99n,filters);await page([2]);
+ const t=telegramSession();await t.send('/start');await t.click('subs');await t.click('sub',sub.id);await t.click('viewsubjobs');
+ await t.click('subscribe');assert.match(t.text(),/already have this alert/);assert.equal((await db.subscription.findUniqueOrThrow({where:{id:sub.id}})).watermark,sub.watermark);
+ await t.click('editsub');await t.click('keyword');await t.send('SaaS');await t.click('results');await t.click('subscribe');assert.match(t.text(),/Alert updated/);assert.equal((await db.subscription.findUniqueOrThrow({where:{id:sub.id}})).keyword,'SaaS');
+ await t.click('deletesub');assert.equal(await db.subscription.count(),1);await t.click('sub',sub.id);assert.equal(await db.subscription.count(),1);
+ await t.click('deletesub');await t.click('confirmdel');assert.equal(await db.subscription.count(),0);assert.match(t.text(),/Save a search/);
 });
 
 test('Telegram 429 postpones delivery and 403 stops reminders',async()=>{
@@ -143,7 +198,7 @@ test('source outage delivers recently verified jobs and defers outdated jobs',as
  await db.job.update({where:{id:'jobicy:2'},data:{checkedAt:new Date(Date.now()-25*3600000)}});
  let sent='';
  await deliverDigest(db,delivery.id,{send:async(_chat,text)=>{sent=text;return 1;}},new Date(),(async()=>new Response('',{status:503})) as typeof fetch);
- assert.match(sent,/Engineer 1/);assert.doesNotMatch(sent,/Engineer 2/);assert.match(sent,/updates delayed/);
+ assert.match(sent,/Engineer 1/);assert.doesNotMatch(sent,/Engineer 2/);assert.match(sent,/updates delayed/i);
  assert.equal((await db.delivery.findUniqueOrThrow({where:{id:delivery.id}})).status,'sent');
  assert.equal(await db.deferredMatch.count({where:{jobId:'jobicy:2'}}),1);
 });
