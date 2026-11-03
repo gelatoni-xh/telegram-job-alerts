@@ -1,10 +1,10 @@
 import { Prisma, type DigestItem, type Job } from '@prisma/client';
 import type { Db } from './db.js';
 import { boundary,lockUser } from './db.js';
-import { localDate,nextDue } from './rules.js';
+import { localDate,nextDue,snippet } from './rules.js';
 import { matchSql,checkStatuses } from './jobs.js';
-import { enqueue } from './tasks.js';
-export type Match={id:string;revision:number;name:string};
+import { enqueue,safeError } from './tasks.js';
+export type Match={id:string;revision:number;name:string;keyword?:string};
 export async function generateDigest(db:Db,userId:bigint,now=new Date()) {
  return db.$transaction(async tx=>{
   await lockUser(tx,userId);
@@ -26,7 +26,7 @@ export async function generateDigest(db:Db,userId:bigint,now=new Date()) {
    for(const job of byId.values()) {
     if(job.status==='closed'){await tx.deferredMatch.deleteMany({where:{subscriptionId:sub.id,jobId:job.id}});continue;}
     if(job.status!=='active'||job.checkedAt.getTime()<now.getTime()-24*3600_000){await tx.deferredMatch.upsert({where:{subscriptionId_revision_jobId:{subscriptionId:sub.id,revision:sub.revision,jobId:job.id}},create:{subscriptionId:sub.id,revision:sub.revision,jobId:job.id},update:{}});continue;}
-    candidates.set(job.id,[...(candidates.get(job.id)??[]),{id:sub.id,revision:sub.revision,name:sub.name}]);
+    candidates.set(job.id,[...(candidates.get(job.id)??[]),{id:sub.id,revision:sub.revision,name:sub.name,keyword:sub.keyword}]);
     await tx.deferredMatch.deleteMany({where:{subscriptionId:sub.id,jobId:job.id}});
    }
    await tx.subscription.update({where:{id:sub.id},data:{watermark:upper}});
@@ -48,7 +48,7 @@ export async function scheduleUsers(db:Db) {
  for(const d of deliveries)await enqueue(db,'deliver',`delivery:${d.id}:${d.attempts}:${Math.floor(Date.now()/300000)}`,{id:d.id});
 }
 export type Messenger={send:(chatId:bigint,text:string,digestId:string)=>Promise<number>};
-export async function deliverDigest(db:Db,id:string,messenger:Messenger,now=new Date()) {
+export async function deliverDigest(db:Db,id:string,messenger:Messenger,now=new Date(),fetcher:typeof fetch=fetch) {
  let d=await db.delivery.findUnique({where:{id},include:{digest:{include:{user:true}}}});
  if(!d||!['pending','uncertain'].includes(d.status))return;
  const userId=d.digest.userId;
@@ -74,16 +74,18 @@ export async function deliverDigest(db:Db,id:string,messenger:Messenger,now=new 
  const items=await db.digestItem.findMany({where:{digestId:prepared.digestId},include:{job:true}});
  // Only refresh stale IDs; routine requests share the source limit and batch size.
  const stale=items.filter(i=>i.job.checkedAt.getTime()<now.getTime()-3600_000).map(i=>i.jobId);
- for(let i=0;i<stale.length;i+=100) await checkStatuses(db,stale.slice(i,i+100));
+ let refreshDelayed=false;
+ try{for(let i=0;i<stale.length;i+=100) await checkStatuses(db,stale.slice(i,i+100),fetcher);}catch(e){refreshDelayed=true;console.error(JSON.stringify({event:'delivery_status_refresh_delayed',error:safeError(e)}));}
  const subs=await db.subscription.findMany({where:{userId,paused:false}}),valid=new Map(subs.map(s=>[s.id,s.revision]));
  const current=await db.digestItem.findMany({where:{digestId:prepared.digestId},include:{job:true}});
  const retained:(DigestItem&{job:Job})[]=[];
  for(const item of current) {
   const matches=(item.matches as Match[]).filter(m=>valid.get(m.id)===m.revision);
-  if(matches.length&&item.job.status==='unknown'){
+  const outdated=item.job.checkedAt.getTime()<now.getTime()-24*3600_000;
+  if(matches.length&&(item.job.status==='unknown'||outdated&&item.job.status==='active')){
    for(const match of matches) await db.deferredMatch.upsert({where:{subscriptionId_revision_jobId:{subscriptionId:match.id,revision:match.revision,jobId:item.jobId}},create:{subscriptionId:match.id,revision:match.revision,jobId:item.jobId},update:{}});
   }
-  if(!matches.length||item.job.status!=='active'){await db.digestItem.delete({where:{id:item.id}});continue;}
+  if(!matches.length||item.job.status!=='active'||outdated){await db.digestItem.delete({where:{id:item.id}});continue;}
   await db.digestItem.update({where:{id:item.id},data:{matches}});retained.push({...item,matches});
  }
  retained.sort((a,b)=>(b.job.publishedAt??b.job.firstSeenAt).getTime()-(a.job.publishedAt??a.job.firstSeenAt).getTime()||b.jobId.localeCompare(a.jobId));
@@ -91,7 +93,7 @@ export async function deliverDigest(db:Db,id:string,messenger:Messenger,now=new 
  if(!retained.length){await db.delivery.update({where:{id:prepared.deliveryId},data:{status:'cancelled'}});return;}
  const live=await db.user.findUnique({where:{id:userId}});if(!live||live.paused||live.unreachable)return;
  const source=await db.syncRun.findFirst({where:{status:'complete'},orderBy:{finishedAt:'desc'}});
- const text=`${retained.length} new matching job${retained.length===1?'':'s'}\n\n${retained.slice(0,3).map((i,n)=>`${n+1}. ${i.job.title.slice(0,150)} — ${i.job.company.slice(0,80)}\n${i.job.geo}\n${(i.matches as Match[]).map(m=>m.name).join('; ').slice(0,140)}`).join('\n\n')}\n\nSource: Jobicy. View all to see every match.\nLast complete sync: ${source?.finishedAt?.toISOString()??'not yet complete'}`;
+ const text=`${retained.length} new matching job${retained.length===1?'':'s'}\n\n${retained.slice(0,3).map((i,n)=>`${n+1}. ${i.job.title.slice(0,150)} — ${i.job.company.slice(0,80)}\n${i.job.geo}\n${i.job.salary??'Salary not specified'}\n${i.job.publishedAt?'Published '+i.job.publishedAt.toISOString().slice(0,10):'Discovered '+i.job.firstSeenAt.toISOString().slice(0,10)}\n${snippet(i.job.description,(i.matches as Match[]).map(m=>m.keyword??'').find(Boolean)??'',100)}\n${(i.matches as Match[]).map(m=>m.name).join('; ').slice(0,140)}`).join('\n\n')}\n\nSource: Jobicy. View all to see every match.\nLast complete sync: ${source?.finishedAt?.toISOString()??'not yet complete'}${refreshDelayed||!source?.finishedAt||now.getTime()-source.finishedAt.getTime()>2*3600_000?' — updates delayed':''}`;
  // Persist sending first: a crash after this point is an uncertain outcome, never an assumed success.
  await db.delivery.update({where:{id:prepared.deliveryId},data:{status:'sending',attempts:{increment:1}}});
  try {
@@ -103,9 +105,10 @@ export async function deliverDigest(db:Db,id:string,messenger:Messenger,now=new 
   ]);
  }catch(e){
   const err=e as {error_code?:number;parameters?:{retry_after?:number}};
-  if(err.error_code===403){await db.user.update({where:{id:userId},data:{unreachable:true}});await db.delivery.update({where:{id:prepared.deliveryId},data:{status:'unreachable',error:'Telegram 403'}});return;}
+  if(err.error_code===403){await db.event.upsert({where:{key:`unreachable:${prepared.deliveryId}`},create:{key:`unreachable:${prepared.deliveryId}`,type:'delivery_unreachable',userId},update:{}});await db.user.update({where:{id:userId},data:{unreachable:true}});await db.delivery.update({where:{id:prepared.deliveryId},data:{status:'unreachable',error:'Telegram 403'}});return;}
   const definite=typeof err.error_code==='number';
   const fresh=await db.delivery.findUniqueOrThrow({where:{id:prepared.deliveryId}});
+  await db.event.upsert({where:{key:`send-failed:${prepared.deliveryId}:${fresh.attempts}`},create:{key:`send-failed:${prepared.deliveryId}:${fresh.attempts}`,type:'digest_failed',userId,dimensions:{digestId:prepared.digestId,attempt:fresh.attempts,uncertain:!definite}},update:{}});
   await db.delivery.update({where:{id:prepared.deliveryId},data:{status:fresh.attempts>=8?'failed':definite?'pending':'uncertain',error:definite?`Telegram ${err.error_code}`:'Delivery outcome unknown',nextAttemptAt:new Date(Date.now()+(err.parameters?.retry_after??Math.min(3600,60*2**fresh.attempts))*1000)}});
  }
 }

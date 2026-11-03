@@ -39,7 +39,7 @@ Files outside Git:
 10. First release uploads image and deployment scripts to `releases/<sha>`. Verify SHA256, load the image, run `scripts/deploy.sh <sha>`.
 11. Deployment backs up even an empty database, checks database identity, deploys migrations, grants runtime privileges and starts the app. Poll readiness; on failure inspect project logs. Database migrations are never automatically reversed.
 12. Verify runtime can read/write application tables but cannot create tables, access `_prisma_migrations`, or impersonate the owner.
-13. With scheduling disabled, run `docker compose --env-file release.env exec -T app node dist/src/cli.js sync`. Wait for a complete baseline traversal before accepting subscriptions.
+13. With scheduling disabled, run `docker compose --env-file release.env run --rm --no-deps app node dist/src/cli.js sync`. Wait for a complete baseline traversal before accepting subscriptions.
 14. Add only the exact HTTPS webhook location from `infra/nginx.conf.example` to the selected domain's TLS server block. Back up the site config, run `sudo nginx -t`, then reload. No public health/debug endpoint is needed.
 15. Confirm public POST with an invalid secret returns 403, and existing sites remain healthy. Nginx must preserve `X-Telegram-Bot-Api-Secret-Token`; Cloudflare must not issue an interactive challenge on this path.
 16. Set all three modes true, recreate only the project app. Set the webhook with `node dist/src/cli.js webhook` inside the app. Pending Telegram updates are preserved.
@@ -50,7 +50,9 @@ Files outside Git:
 
 The workflow checks isolated PostgreSQL tests and a Docker build, then transfers an image archive over SSH. It does not store production bot or database credentials in GitHub. It checks archive integrity and deploys the exact commit tag. Server `flock` and GitHub deployment concurrency serialize releases. A database advisory lock allows only one active app instance; task leases are not a license to run multiple app replicas.
 
-`docker compose --env-file release.env exec -T app node dist/src/cli.js doctor` reports sync freshness, oldest queued work, failed tasks, uncertain deliveries and connection counts. Logs redact URLs and credential patterns. Inspect failed work rather than assuming it was dropped.
+Run administrative commands in a temporary container with its own memory budget, using `run --rm --no-deps app`; each command also opens its own database pool, so run one at a time.
+
+`docker compose --env-file release.env run --rm --no-deps app node dist/src/cli.js doctor` reports sync freshness, oldest queued work, failed tasks, uncertain deliveries and connection counts. Logs redact URLs and credential patterns. Inspect failed work rather than assuming it was dropped.
 
 Use `node dist/src/cli.js retry-failed <task-id>` for a reviewed failed task. Inspect uncertain delivery outcomes first: Telegram may have accepted a send whose response was lost. Retrying can duplicate a message; there is no exactly-once guarantee across that external API.
 

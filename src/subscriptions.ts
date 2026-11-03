@@ -7,10 +7,10 @@ export async function saveSubscription(db:Db,userId:bigint,f:Filters,id?:string)
   await lockUser(tx,userId);
   const watermark=await boundary(tx), hash=filterHash(f);
   const duplicate=await tx.subscription.findUnique({where:{userId_filterHash:{userId,filterHash:hash}}});
-  if(duplicate&&duplicate.id!==id)return duplicate;
+  if(duplicate&&duplicate.id!==id)return {...duplicate,alreadyExists:true};
   const name=[f.countries.join(', ')||'Any country',f.categories.join(', ')||'Any occupation',f.keyword].filter(Boolean).join(' · ').slice(0,180);
-  if(id){const old=await tx.subscription.findFirst({where:{id,userId}});if(!old)throw new Error('Subscription not found');await tx.deferredMatch.deleteMany({where:{subscriptionId:id}});return tx.subscription.update({where:{id},data:{...f,name,filterHash:hash,watermark,revision:{increment:1}}});}
-  return tx.subscription.create({data:{userId,...f,name,filterHash:hash,watermark}});
+  if(id){const old=await tx.subscription.findFirst({where:{id,userId}});if(!old)throw new Error('Subscription not found');await tx.deferredMatch.deleteMany({where:{subscriptionId:id}});return {...await tx.subscription.update({where:{id},data:{...f,name,filterHash:hash,watermark,revision:{increment:1}}}),alreadyExists:false};}
+  return {...await tx.subscription.create({data:{userId,...f,name,filterHash:hash,watermark}}),alreadyExists:false};
  });
 }
 export async function setPaused(db:Db,userId:bigint,id:string,paused:boolean) {

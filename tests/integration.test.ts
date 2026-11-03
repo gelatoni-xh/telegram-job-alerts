@@ -112,3 +112,15 @@ test('pending days combine without losing jobs or sending twice',async()=>{
  await deliverDigest(db,delivery.id,{send:async()=>{sends++;return 7;}});assert.equal(sends,1);assert.equal(await db.delivery.count({where:{status:'superseded'}}),1);const sent=await db.delivery.findFirstOrThrow({where:{status:'sent'}});assert.equal(await db.digestItem.count({where:{digestId:sent.digestId}}),2);
  await deliverDigest(db,delivery.id,{send:async()=>{sends++;return 8;}});assert.equal(sends,1);
 });
+
+test('source outage delivers recently verified jobs and defers outdated jobs',async()=>{
+ await user();await saveSubscription(db,1n,filters);await page([1,2]);
+ const digest=await generateDigest(db,1n);const delivery=await db.delivery.findUniqueOrThrow({where:{digestId:digest!.id}});
+ await db.job.update({where:{id:'jobicy:1'},data:{checkedAt:new Date(Date.now()-2*3600000)}});
+ await db.job.update({where:{id:'jobicy:2'},data:{checkedAt:new Date(Date.now()-25*3600000)}});
+ let sent='';
+ await deliverDigest(db,delivery.id,{send:async(_chat,text)=>{sent=text;return 1;}},new Date(),(async()=>new Response('',{status:503})) as typeof fetch);
+ assert.match(sent,/Engineer 1/);assert.doesNotMatch(sent,/Engineer 2/);assert.match(sent,/updates delayed/);
+ assert.equal((await db.delivery.findUniqueOrThrow({where:{id:delivery.id}})).status,'sent');
+ assert.equal(await db.deferredMatch.count({where:{jobId:'jobicy:2'}}),1);
+});
