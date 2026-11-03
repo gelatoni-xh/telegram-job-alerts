@@ -5,7 +5,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { readConfig } from '../src/config.js';
 import { createDb,verifyDatabase,boundary } from '../src/db.js';
-import { savePage,searchJobs,syncSource,checkStatuses } from '../src/jobs.js';
+import { savePage,searchJobs,syncSource,checkStatuses,jobFilterOptions } from '../src/jobs.js';
 import { saveSubscription,setPaused,pauseAll } from '../src/subscriptions.js';
 import { generateDigest,deliverDigest,scheduleUsers } from '../src/digests.js';
 import { enqueue,claim,runOne } from '../src/tasks.js';
@@ -32,6 +32,29 @@ test('subscription baseline, same-ID edits, OR/AND and literal percent matching'
  assert.equal((await searchJobs(db,{countries:['CA','US'],categories:['Other'],keyword:''})).count,0);
  const digest=await generateDigest(db,1n);const items=await db.digestItem.findMany({where:{digestId:digest!.id}});assert.deepEqual(items.map(j=>j.jobId),['jobicy:2']);
  assert.equal((await generateDigest(db,1n))!.id,digest!.id);assert.equal(await db.digest.count(),1);
+});
+test('filter options rank distinct active jobs, respect other filters and retain zero supply',async()=>{
+ await db.$transaction(tx=>savePage(tx,[
+  job(1,{jobGeo:'USA',jobIndustry:['Software Engineering','Software Engineering']}),
+  job(2,{jobGeo:'USA',jobIndustry:['Marketing & Sales']}),
+  job(3,{jobGeo:'Canada',jobIndustry:['Marketing & Sales']}),
+  job(4,{jobGeo:'Canada',jobIndustry:['Retired occupation']}),
+  job(5,{jobGeo:'Anywhere',jobIndustry:['Marketing & Sales']})
+ ]));
+ await db.job.update({where:{id:'jobicy:4'},data:{status:'closed'}});
+ const f={countries:[],categories:[],keyword:''};
+ const countries=await jobFilterOptions(db,'country',f);
+ assert.deepEqual(countries.slice(0,2).map(o=>[o.key,o.count]),[['US',3],['CA',2]]);
+ assert.equal(countries.find(o=>o.key==='JP')!.count,1);
+ const marketing=await jobFilterOptions(db,'country',{...f,countries:['US'],categories:['Marketing & Sales']});
+ assert.deepEqual(marketing.slice(0,2).map(o=>[o.key,o.count]),[['CA',2],['US',2]]);
+ const occupations=await jobFilterOptions(db,'category',{...f,countries:['US'],categories:['Software Engineering']});
+ assert.deepEqual(occupations.slice(0,2).map(o=>[o.key,o.count]),[['Marketing & Sales',2],['Software Engineering',1]]);
+ assert.equal(occupations.find(o=>o.key==='Retired occupation')!.count,0);
+ assert.equal(occupations.find(o=>o.key==='Healthcare & Medical')!.count,0);
+ const none=await jobFilterOptions(db,'country',{...f,keyword:'absent phrase'});
+ assert.ok(none.length>200);assert.ok(none.every(o=>o.count===0));
+ assert.equal(none[0]!.name,'Afghanistan');
 });
 test('paused/resumed subscriptions and edit revisions do not replay existing inventory',async()=>{
  await user();const sub=await saveSubscription(db,1n,filters);await page([1]);await setPaused(db,1n,sub.id,true);await page([2]);await setPaused(db,1n,sub.id,false);await page([3]);

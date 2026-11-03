@@ -1,8 +1,8 @@
 import { Bot, InlineKeyboard, GrammyError, type Context } from 'grammy';
 import type { Db } from './db.js';
 import type { Config } from './config.js';
-import { countryOptions, snippet, type Filters } from './rules.js';
-import { categories,searchJobs } from './jobs.js';
+import { snippet, type Filters } from './rules.js';
+import { jobFilterOptions,searchJobs } from './jobs.js';
 import { saveSubscription,setPaused,pauseAll,setSchedule } from './subscriptions.js';
 import { deleteUser } from './privacy.js';
 import type { Match } from './digests.js';
@@ -29,21 +29,20 @@ export function createBot(db:Db,config:Config,botInfo?:ConstructorParameters<typ
  async function menu(ctx:Context,u:User){const kb=new InlineKeyboard();button(kb,u,'Find jobs','find').row();button(kb,u,'My subscriptions','subs').row();button(kb,u,'Settings','settings').row();button(kb,u,'Data status','status');await view(ctx,'Find remote jobs and get one daily digest of new matches.\n\nCurrent source: Jobicy. Coverage follows this source; country matching is not a work-rights or visa check.\n\nFree to use. No job listings are our own postings.',kb);}
  async function selection(ctx:Context,u:User,kind:'country'|'category',page=0,query=''){
   const s=state(u),f=s.filters??empty();
-  const actual=kind==='country'?countryOptions.map(c=>({key:c.code,name:c.name})):await categoryOptions();
+  const actual=await jobFilterOptions(db,kind,f);
   const options=actual.filter(c=>`${c.key} ${c.name}`.toLowerCase().includes(query.toLowerCase()));
   const p=Math.max(0,Math.min(page,Math.max(0,Math.ceil(options.length/8)-1))),shown=options.slice(p*8,p*8+8);
   u=await put(db,u,{...s,step:kind,query,page:p,choices:shown.map(v=>v.key)});
   const selected=kind==='country'?f.countries:f.categories,kb=new InlineKeyboard();
   button(kb,u,`${selected.length?'☐':'☑'} Any ${kind==='country'?'country':'occupation'}`,'any',kind);if(!selected.length)kb.success();kb.row();
-  shown.forEach((v,i)=>{const checked=selected.includes(v.key);button(kb,u,`${checked?'☑':'☐'} ${v.name}`,'pick',String(i));if(checked)kb.success();kb.row();});
+  shown.forEach((v,i)=>{const checked=selected.includes(v.key);button(kb,u,`${checked?'☑':'☐'} ${v.name} · ${v.count}`,'pick',String(i));if(checked)kb.success();kb.row();});
   if(p>0)button(kb,u,'‹ Previous page','selectpage',String(p-1));if((p+1)*8<options.length)button(kb,u,'Next page ›','selectpage',String(p+1));kb.row();
   button(kb,u,`🔎 Search ${kind==='country'?'countries':'occupations'}`,'lookup',kind).row();
   button(kb,u,`Continue → ${kind==='country'?'Occupations':'Keyword'}`,kind==='country'?'category':'keyword').primary().row();
   button(kb,u,'↩ Main menu','menu');
   const selectedNames=selected.map(key=>actual.find(option=>option.key===key)?.name??key);
-  await view(ctx,`Step ${kind==='country'?'1':'2'} of 3 · ${kind==='country'?'Where do you live?':'Choose occupations'}\n${kind==='country'?'Select your country of residence to match job location requirements.':'You can select more than one occupation.'}\n\n☑ Selected · ☐ Not selected\nSelected: ${selectedNames.join(', ')||'Any'}\n\nTap options to select or unselect, then tap Continue.\n${options.length} options${query?` for “${query}”`:''} · Page ${p+1} of ${Math.max(1,Math.ceil(options.length/8))}.`,kb);
+  await view(ctx,`Step ${kind==='country'?'1':'2'} of 3 · ${kind==='country'?'Where do you live?':'Choose occupations'}\n${kind==='country'?'Select your country of residence to match job location requirements.':'You can select more than one occupation.'}\n\n☑ Selected · ☐ Not selected\nCounts: active jobs matching your other filters, highest first.\nSelected: ${selectedNames.join(', ')||'Any'}\n\nTap options to select or unselect, then tap Continue.\n${options.length} options${query?` for “${query}”`:''} · Page ${p+1} of ${Math.max(1,Math.ceil(options.length/8))}.`,kb);
  }
- async function categoryOptions(){const rows=await db.$queryRaw<{name:string}[]>`SELECT DISTINCT unnest(categories) AS name FROM "Job"`;return [...new Set([...categories,...rows.map(r=>r.name)])].sort().map(name=>({key:name,name}));}
  async function keyword(ctx:Context,u:User){u=await put(db,u,{...state(u),step:'keyword'});const kb=new InlineKeyboard();button(kb,u,'Skip keyword','skip').row();button(kb,u,'Back to occupations','category');await view(ctx,'Send an optional keyword or phrase (title or description). Matching is literal and ignores case. Or skip it.',kb);}
  async function results(ctx:Context,u:User,page=0){const s=state(u),f=s.filters??empty();let {jobs,count}=await searchJobs(db,f,Math.max(0,page)*5);if(page>0&&page*5>=count){page=Math.max(0,Math.ceil(count/5)-1);({jobs,count}=await searchJobs(db,f,page*5));}u=await put(db,u,{...s,step:'results',page});
   const latest=await db.syncRun.findFirst({where:{status:'complete'},orderBy:{finishedAt:'desc'}});

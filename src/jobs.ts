@@ -2,7 +2,7 @@ import { z } from 'zod';
 import { Prisma, type Job } from '@prisma/client';
 import type { Db, Tx } from './db.js';
 import { boundary } from './db.js';
-import { cleanHtml, geography, escapeLike, type Filters } from './rules.js';
+import { cleanHtml, geography, escapeLike, countryOptions, type Filters } from './rules.js';
 const listing=z.object({id:z.number().int().positive(),url:z.string().url(),jobTitle:z.string().max(2000),companyName:z.string().max(1000),jobGeo:z.string().default(''),jobIndustry:z.array(z.string()).default([]),jobDescription:z.string().max(500000),pubDate:z.string().optional(),salaryMin:z.union([z.number(),z.string()]).nullable().optional(),salaryMax:z.union([z.number(),z.string()]).nullable().optional(),salaryCurrency:z.string().nullable().optional(),salaryPeriod:z.string().nullable().optional()});
 const page=z.object({success:z.literal(true),jobs:z.array(listing).max(100),nextCursor:z.string().nullable(),hasMore:z.boolean()});
 export class SourceError extends Error {constructor(message:string,public retryAfter=60){super(message);}}
@@ -66,3 +66,15 @@ export async function searchJobs(db:Db|Tx,f:Filters,offset=0,limit=5){
  return {count:Number(count?.count??0),jobs};
 }
 export const categories=[ 'Content & Editorial','Creative & Design','Customer Success','Data Science & Analytics','DevOps & Infrastructure','Finance & Accounting','Healthcare & Medical','HR & Recruiting','Marketing & Sales','Product & Operations','Software Engineering' ];
+export async function jobFilterOptions(db:Db,kind:'country'|'category',filters:Filters){
+ const context={...filters,[kind==='country'?'countries':'categories']:[]};
+ const column=kind==='country'?Prisma.sql`j.countries`:Prisma.sql`j.categories`;
+ const rows=await db.$queryRaw<{key:string;count:bigint}[]>`
+  SELECT option.key,COUNT(DISTINCT j.id) FILTER (WHERE j.status='active' ${matchSql(context)}) AS count
+  FROM "Job" j CROSS JOIN LATERAL unnest(${column}) AS option(key) GROUP BY option.key`;
+ const counts=new Map(rows.map(r=>[r.key,Number(r.count)]));
+ const options=kind==='country'?countryOptions.map(c=>({key:c.code,name:c.name})):
+  [...new Set([...categories,...rows.map(r=>r.key)])].map(name=>({key:name,name}));
+ return options.map(o=>({...o,count:counts.get(o.key)??0}))
+  .sort((a,b)=>b.count-a.count||a.name.localeCompare(b.name)||a.key.localeCompare(b.key));
+}
