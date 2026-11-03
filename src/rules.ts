@@ -24,7 +24,7 @@ export function geography(geo:string,description:string):{countries:string[];res
   if(code){found.add(code);continue;} unknown.push(raw);
  }
  // Narrow positive residency requirements override broader source labels.
- for(const m of description.matchAll(/\b(?:must (?:be based|reside|live) in|(?:applicants|candidates) must be located in)\s+(?:the )?(United States|USA|United Kingdom|UK|Canada|Germany|France|Australia|India)\b(?!\s*(?:,|or|and)\b)/gi)) {
+ for(const m of description.matchAll(/\b(?:must (?:be based|reside|live) in|(?:applicants|candidates) must be located in)\s+(?:the )?(United States|USA|United Kingdom|UK|Canada|Germany|France|Australia|India)\b(?=\s*(?:[.!;]|$))/gi)) {
   const code=aliases[m[1]!.toLowerCase()] ?? countriesLib.getAlpha2Code(m[1]!,'en');
   if(code){for(const c of found)if(c!==code)found.delete(c);evidence.push(m[0]);}
  }
