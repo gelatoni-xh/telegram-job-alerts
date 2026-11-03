@@ -1,0 +1,18 @@
+{
+  "name":"telegram-job-alerts","version":"0.1.0","private":true,"type":"module",
+  "engines":{"node":">=24 <25"},"packageManager":"pnpm@10.32.1",
+  "scripts":{
+    "dev":"tsx watch --env-file=.env src/main.ts",
+    "build":"tsc",
+    "typecheck":"tsc --noEmit",
+    "lint":"tsc --noEmit",
+    "test":"tsx --test tests/*.test.ts",
+    "start":"node dist/src/main.js",
+    "db:generate":"prisma generate",
+    "db:migrate":"prisma migrate deploy",
+    "ops:doctor":"node dist/src/cli.js doctor",
+    "ops:sync":"node dist/src/cli.js sync",
+    "ops:webhook":"node dist/src/cli.js webhook",
+    "ops:status":"node dist/src/cli.js status"
+  }
+}
