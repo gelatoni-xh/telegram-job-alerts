@@ -12,6 +12,7 @@ import { enqueue,claim,runOne } from '../src/tasks.js';
 import { createHttp } from '../src/http.js';
 import { createBot } from '../src/bot.js';
 import { adminStats } from '../src/stats.js';
+import { adminActivity } from '../src/activity.js';
 import { deleteUser,replayDeletions } from '../src/privacy.js';
 import type { Update } from 'grammy/types';
 const url=process.env.TEST_DATABASE_URL;
@@ -210,10 +211,28 @@ test('admin stats: authorization fails closed, works only in private chat and pr
  const adminConfig={...config,ADMIN_TELEGRAM_ID:'99'},t=telegramSession(adminConfig);
  await t.send('/start');await t.click('find');const before=await db.user.findUniqueOrThrow({where:{id:99n}});
  await t.send('/stats');assert.match(t.text(),/Admin stats/);assert.match(t.text(),/Registered users: 0/);
+ await t.send('/activity');assert.match(t.text(),/Admin activity/);assert.match(t.text(),/Today so far/);
  assert.deepEqual((await db.user.findUniqueOrThrow({where:{id:99n}})).interaction,before.interaction);
  const group=createBot(db,adminConfig,{botInfo:{id:123456,is_bot:true,first_name:'Test',username:'local_test_bot'}} as never);
  group.api.config.use(async()=>{throw new Error('Must not reply with statistics in a group');});
  await group.handleUpdate({update_id:500,message:{message_id:1,date:1,from:{id:99,is_bot:false,first_name:'Admin'},chat:{id:-10,type:'group',title:'Test'},text:'/stats'}});
+});
+
+test('admin activity: event types include administrator and external users in separate columns',async()=>{
+ const now=new Date('2026-11-04T03:00:00Z');
+ await db.event.createMany({data:[
+  {key:'a1',type:'search_completed',userId:99n,createdAt:new Date('2026-11-04T02:00:00Z')},
+  {key:'a2',type:'job_open_clicked',userId:99n,createdAt:new Date('2026-11-03T02:00:00Z')},
+  {key:'u1',type:'search_completed',userId:1n,createdAt:new Date('2026-11-03T03:00:00Z')},
+  {key:'u2',type:'search_completed',userId:1n,createdAt:new Date('2026-10-20T03:00:00Z')},
+ ]});
+ const report=await adminActivity(db,99n,now);
+ assert.match(report,/Last 7 complete days · 2026-10-28 – 2026-11-03/);
+ assert.match(report,/Search completed: 1 \/ 1 \/ 0/);
+ assert.match(report,/Job opened: 1 \/ 0 \/ 1/);
+ assert.match(report,/Today so far · 2026-11-04/);
+ assert.match(report,/Search completed: 1 \/ 0 \/ 1/);
+ assert.doesNotMatch(report,/2026-10-20/);
 });
 
 test('admin stats: Shanghai midnight, weekly unique users, retries and all exclusions',async()=>{

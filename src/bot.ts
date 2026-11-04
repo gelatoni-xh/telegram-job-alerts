@@ -2,6 +2,7 @@ import { Bot, InlineKeyboard, GrammyError, type Context } from 'grammy';
 import type { Db } from './db.js';
 import type { Config } from './config.js';
 import { adminStats } from './stats.js';
+import { adminActivity } from './activity.js';
 import { snippet, type Filters } from './rules.js';
 import { jobFilterOptions,searchJobs } from './jobs.js';
 import { saveSubscription,setPaused,pauseAll,setSchedule } from './subscriptions.js';
@@ -166,6 +167,11 @@ export function createBot(db:Db,config:Config,botInfo?:ConstructorParameters<typ
    if(ctx.chat.type!=='private')return;
    if(!config.ADMIN_TELEGRAM_ID||String(ctx.from.id)!==config.ADMIN_TELEGRAM_ID)return ctx.reply('This command is only available to the administrator.');
    return ctx.reply(await adminStats(db,BigInt(config.ADMIN_TELEGRAM_ID)),{link_preview_options:{is_disabled:true}});
+  }
+  if(/^\/activity(?:@\w+)?(?:\s|$)/.test(ctx.message.text.trim())){
+   if(ctx.chat.type!=='private')return;
+   if(!config.ADMIN_TELEGRAM_ID||String(ctx.from.id)!==config.ADMIN_TELEGRAM_ID)return ctx.reply('This command is only available to the administrator.');
+   return ctx.reply(await adminActivity(db,BigInt(config.ADMIN_TELEGRAM_ID)),{link_preview_options:{is_disabled:true}});
   }
   const foundUser=await user(ctx);if(!foundUser)return;let u:User=foundUser;const text=ctx.message.text.trim(),s=state(u);
   if(/^\/start(?:@\w+)?(?:\s|$)/.test(text)||['/menu','/cancel'].includes(text)){u=await put(db,u,{...s,step:'home',pendingSubscribe:false});await event(ctx,u,'start');return menu(ctx,u);}
