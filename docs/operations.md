@@ -48,7 +48,7 @@ Files outside Git:
 
 ## Normal releases and failures
 
-The workflow checks isolated PostgreSQL tests and a Docker build, then transfers an image archive over SSH. It does not store production bot or database credentials in GitHub. It checks archive integrity and deploys the exact commit tag. Server `flock` and GitHub deployment concurrency serialize releases. A database advisory lock allows only one active app instance; task leases are not a license to run multiple app replicas.
+The workflow checks isolated PostgreSQL tests and a Docker build, then transfers an image archive over SSH. It does not store production bot or database credentials in GitHub. It checks archive integrity and deploys the exact commit tag. Server `flock` and GitHub deployment concurrency serialize releases. A database advisory lock allows only one active app instance; task leases are not a license to run multiple app replicas. After readiness succeeds, the deployment keeps the current and previous image tags and removes older `telegram-job-alerts:<full-sha>` images. Cleanup is best effort and cannot fail an otherwise healthy deployment.
 
 Run administrative commands in a temporary container with its own memory budget, using `run --rm --no-deps app`; each command also opens its own database pool, so run one at a time.
 
@@ -58,7 +58,7 @@ Use `node dist/src/cli.js retry-failed <task-id>` for a reviewed failed task. In
 
 Rollback code only when its schema remains compatible: stop app, replace `release.env` with `previous-release.env`, then recreate app and check readiness. Do not restore a stale DB merely to roll back code. Never run migration reset, seed production, or global Docker prune.
 
-Only delete old image/archive resources bearing this project's name after confirming the current and previous image tags. Automatic global cleanup is deliberately absent.
+The deployment removes old image resources bearing this project's name after confirming readiness, while retaining the current and previous full-SHA tags for rollback. It does not prune unrelated images, dangling resources, volumes, or release archives. If cleanup fails, inspect disk usage and remove only confirmed old project images manually.
 
 ## Backups and restoration
 
