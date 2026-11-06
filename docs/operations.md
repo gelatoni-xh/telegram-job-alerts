@@ -39,7 +39,7 @@ Files outside Git:
 10. First release uploads image and deployment scripts to `releases/<sha>`. Verify SHA256, load the image, run `scripts/deploy.sh <sha>`.
 11. Deployment backs up even an empty database, checks database identity, deploys migrations, grants runtime privileges and starts the app. Poll readiness; on failure inspect project logs. Database migrations are never automatically reversed.
 12. Verify runtime can read/write application tables but cannot create tables, access `_prisma_migrations`, or impersonate the owner.
-13. With scheduling disabled, run `docker compose --env-file release.env run --rm --no-deps app node dist/src/cli.js sync`. Wait for a complete baseline traversal before accepting subscriptions.
+13. With scheduling disabled, run `docker compose --env-file .env --env-file release.env run --rm --no-deps app node dist/src/cli.js sync`. Wait for a complete baseline traversal before accepting subscriptions.
 14. Add only the exact HTTPS webhook location from `infra/nginx.conf.example` to the selected domain's TLS server block. Back up the site config, run `sudo nginx -t`, then reload. No public health/debug endpoint is needed.
 15. Confirm public POST with an invalid secret returns 403, and existing sites remain healthy. Nginx must preserve `X-Telegram-Bot-Api-Secret-Token`; Cloudflare must not issue an interactive challenge on this path.
 16. Set all three modes true, recreate only the project app. Set the webhook with `node dist/src/cli.js webhook` inside the app. Pending Telegram updates are preserved.
@@ -52,7 +52,7 @@ The workflow checks isolated PostgreSQL tests and a Docker build, then transfers
 
 Run administrative commands in a temporary container with its own memory budget, using `run --rm --no-deps app`; each command also opens its own database pool, so run one at a time.
 
-`docker compose --env-file release.env run --rm --no-deps app node dist/src/cli.js doctor` reports sync freshness, oldest queued work, failed tasks, uncertain deliveries and connection counts. Logs redact URLs and credential patterns. Inspect failed work rather than assuming it was dropped.
+`docker compose --env-file .env --env-file release.env run --rm --no-deps app node dist/src/cli.js doctor` reports sync freshness, oldest queued work, failed tasks, uncertain deliveries and connection counts. Logs redact URLs and credential patterns. Inspect failed work rather than assuming it was dropped.
 
 Use `node dist/src/cli.js retry-failed <task-id>` for a reviewed failed task. Inspect uncertain delivery outcomes first: Telegram may have accepted a send whose response was lost. Retrying can duplicate a message; there is no exactly-once guarantee across that external API.
 
@@ -98,7 +98,7 @@ The deployment removes old image resources bearing this project's name after con
 After changing command descriptions, update Telegram’s command picker with an independent management container:
 
 ```sh
-docker compose --env-file release.env run --rm --no-deps app node dist/src/cli.js commands
+docker compose --env-file .env --env-file release.env run --rm --no-deps app node dist/src/cli.js commands
 ```
 
 This updates menu metadata without sending messages to users.
@@ -121,3 +121,5 @@ The `gelatoni-xh` profile workflow uses repository Secrets `TELEGRAM_STATS_BOT_T
 The export is updated after Shanghai midnight; the profile workflow normally reads it at 08:00 Shanghai. It reflects the generation-time snapshot; later account deletions or delayed inbox processing may revise a future snapshot. Disable the export setting to stop edits; remove the existing Telegram message and revoke the profile repository token secret when retiring the integration. `/stats` remains an on-demand private report.
 
 Keep `DATABASE_NETWORK` and optional `APP_MEMORY_LIMIT` in a protected server `.env` file so future CI uploads preserve host-specific settings. The runtime `env_file` is separate from Compose interpolation.
+
+Compose commands load both files explicitly: `docker compose --env-file .env --env-file release.env ...`. The first file holds host settings; the second selects the release image.
