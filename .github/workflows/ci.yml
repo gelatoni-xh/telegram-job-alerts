@@ -58,10 +58,10 @@ jobs:
           name: production-image
       - name: Upload and deploy
         env:
-          SSH_HOST: ${{ secrets.UBUNTU3_HOST }}
-          SSH_USER: ${{ secrets.UBUNTU3_USER }}
-          SSH_KEY: ${{ secrets.UBUNTU3_SSH_KEY }}
-          SSH_KNOWN_HOSTS: ${{ secrets.UBUNTU3_KNOWN_HOSTS }}
+          SSH_HOST: ${{ secrets.SERVER_HOST }}
+          SSH_USER: ${{ secrets.SERVER_USER }}
+          SSH_KEY: ${{ secrets.SSH_PRIVATE_KEY }}
+          SSH_KNOWN_HOSTS: ${{ secrets.SSH_KNOWN_HOSTS }}
           RELEASE_SHA: ${{ github.sha }}
         shell: bash
         run: |
