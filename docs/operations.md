@@ -35,16 +35,16 @@ Files outside Git:
 6. Create `.env.production` and `.env.migration`, chmod 600. Set all three modes false initially. Set the expected database exactly. Database hostname is the stable service alias on the shared Docker network; no public database port is necessary.
 7. Create `.ops.conf` with database addressing only. Copy `infra/compose.yml` to server `compose.yml`; the external network is configurable with `DATABASE_NETWORK` in release environment.
 8. Build images in CI, rather than on the small server. The GitHub deployment workflow is disabled until repository variable `DEPLOY_ENABLED=true`.
-9. Configure the GitHub `production` environment and deployment secrets `UBUNTU3_HOST`, `UBUNTU3_USER`, `UBUNTU3_SSH_KEY`, `UBUNTU3_KNOWN_HOSTS`. Use an independently revocable deployment key and an already verified host key.
+9. Configure the GitHub `production` environment and deployment secrets `SERVER_HOST`, `SERVER_USER`, `SSH_PRIVATE_KEY`, `SSH_KNOWN_HOSTS`. Use an independently revocable deployment key and an already verified host key.
 10. First release uploads image and deployment scripts to `releases/<sha>`. Verify SHA256, load the image, run `scripts/deploy.sh <sha>`.
 11. Deployment backs up even an empty database, checks database identity, deploys migrations, grants runtime privileges and starts the app. Poll readiness; on failure inspect project logs. Database migrations are never automatically reversed.
 12. Verify runtime can read/write application tables but cannot create tables, access `_prisma_migrations`, or impersonate the owner.
-13. With scheduling disabled, run `docker compose --env-file release.env run --rm --no-deps app node dist/src/cli.js sync`. Wait for a complete baseline traversal before accepting subscriptions.
+13. With scheduling disabled, run `docker compose --env-file .env --env-file release.env run --rm --no-deps app node dist/src/cli.js sync`. Wait for a complete baseline traversal before accepting subscriptions.
 14. Add only the exact HTTPS webhook location from `infra/nginx.conf.example` to the selected domain's TLS server block. Back up the site config, run `sudo nginx -t`, then reload. No public health/debug endpoint is needed.
 15. Confirm public POST with an invalid secret returns 403, and existing sites remain healthy. Nginx must preserve `X-Telegram-Bot-Api-Secret-Token`; Cloudflare must not issue an interactive challenge on this path.
 16. Set all three modes true, recreate only the project app. Set the webhook with `node dist/src/cli.js webhook` inside the app. Pending Telegram updates are preserved.
 17. Use `/start` in the bot to verify real search, subscription, timezone/time, pause/resume and deletion. Verify a scheduled digest on a controlled subscriber separately from simulated send tests.
-18. Check container RSS, OOM status, restarts, DB connections and existing applications during a complete source sync and interaction cycle. The app has a 192 MiB limit, 96 MiB V8 heap and 0.5 CPU cap; Prisma migration has its own 192 MiB limit.
+18. Check container RSS, OOM status, restarts, DB connections and existing applications during a complete source sync and interaction cycle. The app defaults to a 192 MiB limit (override with `APP_MEMORY_LIMIT` in the Compose interpolation environment), 96 MiB V8 heap and 0.5 CPU cap; Prisma migration has its own 192 MiB limit.
 
 ## Normal releases and failures
 
@@ -52,7 +52,7 @@ The workflow checks isolated PostgreSQL tests and a Docker build, then transfers
 
 Run administrative commands in a temporary container with its own memory budget, using `run --rm --no-deps app`; each command also opens its own database pool, so run one at a time.
 
-`docker compose --env-file release.env run --rm --no-deps app node dist/src/cli.js doctor` reports sync freshness, oldest queued work, failed tasks, uncertain deliveries and connection counts. Logs redact URLs and credential patterns. Inspect failed work rather than assuming it was dropped.
+`docker compose --env-file .env --env-file release.env run --rm --no-deps app node dist/src/cli.js doctor` reports sync freshness, oldest queued work, failed tasks, uncertain deliveries and connection counts. Logs redact URLs and credential patterns. Inspect failed work rather than assuming it was dropped.
 
 Use `node dist/src/cli.js retry-failed <task-id>` for a reviewed failed task. Inspect uncertain delivery outcomes first: Telegram may have accepted a send whose response was lost. Retrying can duplicate a message; there is no exactly-once guarantee across that external API.
 
@@ -98,7 +98,7 @@ The deployment removes old image resources bearing this project's name after con
 After changing command descriptions, update Telegram’s command picker with an independent management container:
 
 ```sh
-docker compose --env-file release.env run --rm --no-deps app node dist/src/cli.js commands
+docker compose --env-file .env --env-file release.env run --rm --no-deps app node dist/src/cli.js commands
 ```
 
 This updates menu metadata without sending messages to users.
@@ -119,3 +119,7 @@ Enable `STATS_EXPORT_ENABLED=true` to maintain one silent, protected, pinned mes
 The `gelatoni-xh` profile workflow uses repository Secrets `TELEGRAM_STATS_BOT_TOKEN` and `TELEGRAM_STATS_CHAT_ID` and calls only Telegram `getChat` to read the pinned snapshot. It must not use `getUpdates` (the production webhook remains active). It validates author, schema, dates, generation time and counts, then copies an explicit aggregate allowlist into public JSON, the English/Chinese READMEs and the daily email. It does not read server files or databases. A missing, stale or invalid snapshot fails the workflow before statistics are written; it never substitutes zero. Website analytics remain browser metrics from Cloudflare; bot data has its own seven-day period.
 
 The export is updated after Shanghai midnight; the profile workflow normally reads it at 08:00 Shanghai. It reflects the generation-time snapshot; later account deletions or delayed inbox processing may revise a future snapshot. Disable the export setting to stop edits; remove the existing Telegram message and revoke the profile repository token secret when retiring the integration. `/stats` remains an on-demand private report.
+
+Keep `DATABASE_NETWORK` and optional `APP_MEMORY_LIMIT` in a protected server `.env` file so future CI uploads preserve host-specific settings. The runtime `env_file` is separate from Compose interpolation.
+
+Compose commands load both files explicitly: `docker compose --env-file .env --env-file release.env ...`. The first file holds host settings; the second selects the release image.

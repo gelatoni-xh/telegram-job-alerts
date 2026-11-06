@@ -9,7 +9,7 @@ services:
     ports: ["127.0.0.1:3050:3000"]
     volumes: ["./state:/app/state"]
     networks: [shared_db]
-    mem_limit: 192m
+    mem_limit: ${APP_MEMORY_LIMIT:-192m}
     cpus: 0.5
     restart: unless-stopped
     stop_grace_period: 30s

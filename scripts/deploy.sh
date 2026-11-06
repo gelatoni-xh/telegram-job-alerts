@@ -18,12 +18,12 @@ fi
 ./scripts/backup.sh
 printf 'APP_IMAGE=%s\n' "$new_image" > next-release.env
 # Identity is checked using the migration config before prisma runs.
-docker compose --env-file next-release.env run --rm --no-deps migrate node dist/src/cli.js identity >/dev/null
-docker compose --env-file next-release.env run --rm --no-deps migrate
+docker compose --env-file .env --env-file next-release.env run --rm --no-deps migrate node dist/src/cli.js identity >/dev/null
+docker compose --env-file .env --env-file next-release.env run --rm --no-deps migrate
 # Default object grants are set by bootstrap; migration-table writes stay owner-only.
 ./scripts/grant-runtime.sh
 mv next-release.env release.env
-docker compose --env-file release.env up -d --no-deps app
+docker compose --env-file .env --env-file release.env up -d --no-deps app
 for attempt in $(seq 1 30); do
   if curl -fsS http://127.0.0.1:3050/readyz >/dev/null; then
     echo "Deployment healthy: $release_sha"
